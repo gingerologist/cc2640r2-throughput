@@ -1097,34 +1097,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
         status = GapAdv_enable(advHandleLegacy, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
         SIMPLEPERIPHERAL_ASSERT(status == SUCCESS);
 
-        // Use long range params to create long range set #2
-        GapAdv_params_t advParamLongRange = GAPADV_PARAMS_AE_LONG_RANGE_CONN;
-
-        // Create Advertisement set #2 and assign handle
-        status = GapAdv_create(&SimplePeripheral_advCallback, &advParamLongRange,
-                               &advHandleLongRange);
-        SIMPLEPERIPHERAL_ASSERT(status == SUCCESS);
-
-        // Load advertising data for set #2 that is statically allocated by the app
-        status = GapAdv_loadByHandle(advHandleLongRange, GAP_ADV_DATA_TYPE_ADV,
-                                     sizeof(advertData), advertData);
-        SIMPLEPERIPHERAL_ASSERT(status == SUCCESS);
-
-        // Set event mask for set #2
-        status = GapAdv_setEventMask(advHandleLongRange,
-                                     GAP_ADV_EVT_MASK_START_AFTER_ENABLE |
-                                     GAP_ADV_EVT_MASK_END_AFTER_DISABLE |
-                                     GAP_ADV_EVT_MASK_SET_TERMINATED);
-
-        // Enable long range advertising for set #2
-        status = GapAdv_enable(advHandleLongRange, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
-        SIMPLEPERIPHERAL_ASSERT(status == SUCCESS);
-
-        // Display device address
-//        Display_printf(dispHandle, SP_ROW_IDA, 0, "%s Addr: %s",
-//                       (addrMode <= ADDRMODE_RANDOM) ? "Dev" : "ID",
-//                       Util_convertBdAddr2Str(pPkt->devAddr));
-
 #if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
         if (addrMode > ADDRMODE_RANDOM)
         {
@@ -1170,13 +1142,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
       {
         // Start advertising since there is room for more connections
         GapAdv_enable(advHandleLegacy, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
-        GapAdv_enable(advHandleLongRange, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
-      }
-      else
-      {
-        // Stop advertising since there is no room for more connections
-        GapAdv_disable(advHandleLongRange);
-        GapAdv_disable(advHandleLegacy);
       }
 
       break;
@@ -1207,7 +1172,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 
       // Start advertising since there is room for more connections
       GapAdv_enable(advHandleLegacy, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
-      GapAdv_enable(advHandleLongRange, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
 
       // Clear remaining lines
       // Display_clearLine(dispHandle, SP_ROW_CONNECTION);
@@ -2451,7 +2415,6 @@ bool SimplePeripheral_doEnablePTMMode(uint8_t index)
 
   // Disable Advertising and destroy sets
   GapAdv_destroy(advHandleLegacy,GAP_ADV_FREE_OPTION_ALL_DATA);
-  GapAdv_destroy(advHandleLongRange,GAP_ADV_FREE_OPTION_ALL_DATA);
 
   // Intercept NPI RX events.
   NPITask_registerIncomingRXEventAppCB(simple_peripheral_handleNPIRxInterceptEvent, INTERCEPT);
