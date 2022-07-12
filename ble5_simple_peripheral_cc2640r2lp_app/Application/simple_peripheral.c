@@ -264,10 +264,6 @@ static ICall_SyncHandle syncEvent;
 static Queue_Struct appMsgQueue;
 static Queue_Handle appMsgQueueHandle;
 
-// Clock instance for internal periodic events. Only one is needed since
-// GattServApp will handle notifying all connected GATT clients
-static Clock_Struct clkPeriodic;
-
 // Memory to pass RPA read event ID to clock handler
 //spClockEventData_t argRpaRead =
 //{ .event = SP_READ_RPA_EVT };
@@ -912,16 +908,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
       {
         // Add connection to list and start RSSI
         SimplePeripheral_addConn(pPkt->connectionHandle);
-
-        // Display the address of this connection
-//        Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Connected to %s",
-//                       Util_convertBdAddr2Str(pPkt->devAddr));
-//
-//        // Enable connection selection option
-//        tbm_setItemStatus(&spMenuMain, SP_ITEM_SELECT_CONN, TBM_ITEM_NONE);
-
-        // Start Periodic Clock.
-        Util_startClock(&clkPeriodic);
       }
 
       if (numActive < MAX_NUM_BLE_CONNS)
@@ -937,24 +923,8 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
     {
       gapTerminateLinkEvent_t *pPkt = (gapTerminateLinkEvent_t *)pMsg;
 
-      // Display the amount of current connections
-      uint8_t numActive = linkDB_NumActive();
-//      Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Device Disconnected!");
-//      Display_printf(dispHandle, SP_ROW_STATUS_2, 0, "Num Conns: %d",
-//                     (uint16_t)numActive);
-
       // Remove the connection from the list and disable RSSI if needed
       SimplePeripheral_removeConn(pPkt->connectionHandle);
-
-      // If no active connections
-      if (numActive == 0)
-      {
-        // Stop periodic clock
-        Util_stopClock(&clkPeriodic);
-
-        // Disable Connection Selection option
-        // tbm_setItemStatus(&spMenuMain, TBM_ITEM_NONE, SP_ITEM_SELECT_CONN);
-      }
 
       // Start advertising since there is room for more connections
       GapAdv_enable(advHandleLegacy, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
