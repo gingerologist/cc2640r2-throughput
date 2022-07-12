@@ -121,16 +121,15 @@
 #define SP_TASK_STACK_SIZE                      644
 #endif
 
-// Application events
-#define SP_CCFG_CHANGE_EVT                      2
-
 // Internal Events for RTOS application
 #define SP_ICALL_EVT                            ICALL_MSG_EVENT_ID // Event_Id_31
 #define SP_QUEUE_EVT                            UTIL_QUEUE_EVENT_ID // Event_Id_30
-#define SP_HTIMER_EVT                           Event_Id_29
+#define SP_SUBSCRIBE_EVT                        Event_Id_29
+#define SP_UNSUBSCRIBE_EVT                      Event_Id_28
+#define SP_HTIMER_EVT                           Event_Id_27
 
 // Bitwise OR of all RTOS events to pend on
-#define SP_ALL_EVENTS                           (SP_ICALL_EVT | SP_QUEUE_EVT | SP_HTIMER_EVT)
+#define SP_ALL_EVENTS                           (SP_ICALL_EVT | SP_QUEUE_EVT | SP_SUBSCRIBE_EVT | SP_UNSUBSCRIBE_EVT | SP_HTIMER_EVT)
 
 // Size of string-converted device address ("0xXXXXXXXXXXXX")
 #define SP_ADDR_STR_SIZE                        15
@@ -141,20 +140,6 @@
 /*********************************************************************
  * TYPEDEFS
  */
-
-// App event passed from stack modules. This type is defined by the application
-// since it can queue events to itself however it wants.
-typedef struct
-{
-  uint8_t event;                // event type
-  void    *pData;               // pointer to message
-} spEvt_t;
-
-// Connected device information
-typedef struct
-{
-  uint16_t         	    connHandle;                        // Connection Handle                   // pointer to clock struct
-} spConnRec_t;
 
 /*********************************************************************
  * GLOBAL VARIABLES
@@ -180,12 +165,8 @@ ICall_EntityID selfEntity;
 // local events.
 static ICall_SyncHandle syncEvent;
 
-// Queue object used for app messages
-static Queue_Struct appMsgQueue;
-static Queue_Handle appMsgQueueHandle;
-
 // Per-handle connection info
-static spConnRec_t connList[MAX_NUM_BLE_CONNS];
+static uint16_t connList[MAX_NUM_BLE_CONNS];
 
 // GAP GATT Attributes
 static uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Simple Peripheral";
@@ -248,7 +229,6 @@ static uint8 advHandleLegacy;
 // Address mode
 static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
 
-static volatile uint8_t ccfg = 0;
 static uint8_t charValue4[SIMPLEPROFILE_CHAR4_LEN] = {0};
 
 static GPTimerCC26XX_Handle hTimer;
@@ -270,10 +250,6 @@ static uint8_t SimplePeripheral_processStackMsg(ICall_Hdr *pMsg);
 static uint8_t SimplePeripheral_processGATTMsg(gattMsgEvent_t *pMsg);
 static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg);
 static void SimplePeripheral_advCallback(uint32_t event, void *pBuf, uintptr_t arg);
-static void SimplePeripheral_processAppMsg(spEvt_t *pMsg);
-static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config);
-void SimplePeripheral_charConfigChangeCB(uint8_t config);
-static status_t SimplePeripheral_enqueueMsg(uint8_t event, void *pData);
 static uint8_t SimplePeripheral_addConn(uint16_t connHandle);
 static uint8_t SimplePeripheral_getConnIndex(uint16_t connHandle);
 static uint8_t SimplePeripheral_removeConn(uint16_t connHandle);
@@ -327,6 +303,15 @@ void SimplePeripheral_createTask(void)
   Task_construct(&spTask, SimplePeripheral_taskFxn, &taskParams, NULL);
 }
 
+void SimplePeripheral_subscribe(void)
+{
+  Event_post(syncEvent, SP_SUBSCRIBE_EVT);
+}
+
+void SimplePeripheral_unsubscribe(void)
+{
+  Event_post(syncEvent, SP_UNSUBSCRIBE_EVT);
+}
 /*********************************************************************
  * @fn      SimplePeripheral_init
  *
@@ -348,9 +333,6 @@ static void SimplePeripheral_init(void)
   RCOSC_enableCalibration();
 #endif // USE_RCOSC
 
-  // Create an RTOS queue for message from profile to be sent to app.
-  appMsgQueueHandle = Util_constructQueue(&appMsgQueue);
-
   // Set the Device Name characteristic in the GAP GATT Service
   // For more information, see the section in the User's Guide:
   // http://software-dl.ti.com/lprf/ble5stack-latest/
@@ -368,28 +350,6 @@ static void SimplePeripheral_init(void)
   GGS_AddService(GATT_ALL_SERVICES);           // GAP GATT Service
   GATTServApp_AddService(GATT_ALL_SERVICES);   // GATT Service
   SimpleProfile_AddService(GATT_ALL_SERVICES); // Simple GATT Profile
-
-  // Setup the SimpleProfile Characteristic Values
-  // For more information, see the GATT and GATTServApp sections in the User's Guide:
-  // http://software-dl.ti.com/lprf/ble5stack-latest/
-  {
-    uint8_t charValue1 = 1;
-    uint8_t charValue2 = 2;
-    uint8_t charValue3 = 3;
-
-    uint8_t charValue5[SIMPLEPROFILE_CHAR5_LEN] = { 1, 2, 3, 4, 5 };
-
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR1, sizeof(uint8_t),
-                               &charValue1);
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR2, sizeof(uint8_t),
-                               &charValue2);
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR3, sizeof(uint8_t),
-                               &charValue3);
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR4, SIMPLEPROFILE_CHAR4_LEN,
-                               charValue4);
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR5, SIMPLEPROFILE_CHAR5_LEN,
-                               charValue5);
-  }
 
   // Register with GAP for HCI/Host messages. This is needed to receive HCI
   // events. For more information, see the HCI section in the User's Guide:
@@ -421,9 +381,6 @@ static void SimplePeripheral_init(void)
 
   //Initialize GAP layer for Peripheral role and register to receive GAP events
   GAP_DeviceInit(GAP_PROFILE_PERIPHERAL, selfEntity, addrMode, NULL);
-
-  // Initialize array to store connection handle and RSSI values
-  // SimplePeripheral_initPHYRSSIArray();
 
   GPTimerCC26XX_Params params;
   GPTimerCC26XX_Params_init(&params);
@@ -487,21 +444,20 @@ static void SimplePeripheral_taskFxn(UArg a0, UArg a1)
         }
       }
 
-      // If RTOS queue is not empty, process app message.
-      if (events & SP_QUEUE_EVT)
+      if (events & SP_SUBSCRIBE_EVT)
       {
-        while (!Queue_empty(appMsgQueueHandle))
-        {
-          spEvt_t *pMsg = (spEvt_t *)Util_dequeueMsg(appMsgQueueHandle);
-          if (pMsg)
-          {
-            // Process message.
-            SimplePeripheral_processAppMsg(pMsg);
+        Types_FreqHz  freq;
+        BIOS_getCpuFreq(&freq);
+        // GPTimerCC26XX_Value loadVal = freq.lo / 1000 - 1; //47999
+        GPTimerCC26XX_Value loadVal = freq.lo / 50 - 1; //4799999
+        GPTimerCC26XX_setLoadValue(hTimer, loadVal);
+        GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
+        GPTimerCC26XX_start(hTimer);
+      }
 
-            // Free the space from the message.
-            ICall_free(pMsg);
-          }
-        }
+      if (events & SP_UNSUBSCRIBE_EVT)
+      {
+        GPTimerCC26XX_stop(hTimer);
       }
 
       if (events & SP_HTIMER_EVT)
@@ -582,11 +538,7 @@ static uint8_t SimplePeripheral_processStackMsg(ICall_Hdr *pMsg)
  */
 static uint8_t SimplePeripheral_processGATTMsg(gattMsgEvent_t *pMsg)
 {
-  if (pMsg->method == ATT_FLOW_CTRL_VIOLATED_EVENT)
-  {
-    // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "FC Violated: %d", pMsg->msg.flowCtrlEvt.opcode);
-  }
-  else if (pMsg->method == ATT_MTU_UPDATED_EVENT)
+  if (pMsg->method == ATT_MTU_UPDATED_EVENT)
   {
     // MTU size updated
     // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "MTU Size: %d", pMsg->msg.mtuEvt.MTU);
@@ -597,37 +549,6 @@ static uint8_t SimplePeripheral_processGATTMsg(gattMsgEvent_t *pMsg)
 
   // It's safe to free the incoming message
   return (TRUE);
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_processAppMsg
- *
- * @brief   Process an incoming callback from a profile.
- *
- * @param   pMsg - message to process
- *
- * @return  None.
- */
-static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
-{
-  bool dealloc = TRUE;
-
-  switch (pMsg->event)
-  {
-    case SP_CCFG_CHANGE_EVT:
-      SimplePeripheral_processCharConfigChangeEvt(*(uint8_t*)(pMsg->pData));
-      break;
-
-    default:
-      // Do nothing.
-      break;
-  }
-
-  // Free message data if it exists and we are to dealloc
-  if ((dealloc == TRUE) && (pMsg->pData != NULL))
-  {
-    ICall_free(pMsg->pData);
-  }
 }
 
 /*********************************************************************
@@ -715,68 +636,11 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
       GapAdv_enable(advHandleLegacy, GAP_ADV_ENABLE_OPTIONS_USE_MAX , 0);
 
       GPTimerCC26XX_stop(hTimer);
-      ccfg = 0;
-
       break;
     }
 
     default:
       break;
-  }
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_charConfigChangeCB
- *
- * @brief   Callback from Simple Profile indicating a characteristic
- *          value change.
- *
- * @param   paramId - parameter Id of the value that was changed.
- *
- * @return  None.
- */
-void SimplePeripheral_charConfigChangeCB(uint8_t config)
-{
-  uint8_t *pValue = ICall_malloc(sizeof(uint8_t));
-
-  if (pValue)
-  {
-    *pValue = config;
-
-    if (SimplePeripheral_enqueueMsg(SP_CCFG_CHANGE_EVT, pValue) != SUCCESS)
-    {
-      ICall_free(pValue);
-    }
-  }
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_processCharConfigChangeEvt
- *
- * @brief   Process a pending Simple Profile characteristic value change
- *          event.
- *
- * @param   paramID - parameter ID of the value that was changed.
- */
-static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config)
-{
-  if (config == (uint8_t)GATT_CLIENT_CFG_NOTIFY)
-  {
-    Types_FreqHz  freq;
-    BIOS_getCpuFreq(&freq);
-    // GPTimerCC26XX_Value loadVal = freq.lo / 1000 - 1; //47999
-    GPTimerCC26XX_Value loadVal = freq.lo / 20 - 1; //4799999
-    GPTimerCC26XX_setLoadValue(hTimer, loadVal);
-    GPTimerCC26XX_registerInterrupt(hTimer, timerCallback, GPT_INT_TIMEOUT);
-    GPTimerCC26XX_start(hTimer);
-
-    ccfg = config;
-  }
-  else if (config == (uint8_t)GATT_CFG_NO_OPERATION)
-  {
-    GPTimerCC26XX_stop(hTimer);
-
-    ccfg = config;
   }
 }
 
@@ -796,33 +660,6 @@ static void SimplePeripheral_advCallback(uint32_t event, void *pBuf, uintptr_t a
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_enqueueMsg
- *
- * @brief   Creates a message and puts the message in RTOS queue.
- *
- * @param   event - message event.
- * @param   state - message state.
- */
-static status_t SimplePeripheral_enqueueMsg(uint8_t event, void *pData)
-{
-  uint8_t success;
-  spEvt_t *pMsg = ICall_malloc(sizeof(spEvt_t));
-
-  // Create dynamic pointer to message.
-  if(pMsg)
-  {
-    pMsg->event = event;
-    pMsg->pData = pData;
-
-    // Enqueue the message.
-    success = Util_enqueueMsg(appMsgQueueHandle, syncEvent, (uint8_t *)pMsg);
-    return (success) ? SUCCESS : FAILURE;
-  }
-
-  return(bleMemAllocError);
-}
-
-/*********************************************************************
  * @fn      SimplePeripheral_addConn
  *
  * @brief   Add a device to the connected device list
@@ -839,10 +676,10 @@ static uint8_t SimplePeripheral_addConn(uint16_t connHandle)
   // Try to find an available entry
   for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
   {
-    if (connList[i].connHandle == CONNHANDLE_INVALID)
+    if (connList[i] == CONNHANDLE_INVALID)
     {
       // Found available entry to put a new connection info in
-      connList[i].connHandle = connHandle;
+      connList[i] = connHandle;
       break;
     }
   }
@@ -864,7 +701,7 @@ static uint8_t SimplePeripheral_getConnIndex(uint16_t connHandle)
 
   for (i = 0; i < MAX_NUM_BLE_CONNS; i++)
   {
-    if (connList[i].connHandle == connHandle)
+    if (connList[i] == connHandle)
     {
       return i;
     }
@@ -902,7 +739,7 @@ static uint8_t SimplePeripheral_clearConnListEntry(uint16_t connHandle)
   {
     if((connIndex == i) || (connHandle == CONNHANDLE_ALL))
     {
-      connList[i].connHandle = CONNHANDLE_INVALID;
+      connList[i] = CONNHANDLE_INVALID;
     }
   }
 

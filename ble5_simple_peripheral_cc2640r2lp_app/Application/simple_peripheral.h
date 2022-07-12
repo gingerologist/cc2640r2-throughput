@@ -56,7 +56,6 @@ extern "C"
 /*********************************************************************
  * INCLUDES
  */
-#include <menu/two_btn_menu.h>
 
 /*********************************************************************
 *  EXTERNAL VARIABLES
@@ -78,6 +77,9 @@ extern "C"
  * Task creation function for the Simple Peripheral.
  */
 extern void SimplePeripheral_createTask(void);
+
+void SimplePeripheral_subscribe(void);
+void SimplePeripheral_unsubscribe(void);
 
 /*********************************************************************
 *********************************************************************/
