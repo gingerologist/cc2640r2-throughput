@@ -79,19 +79,6 @@ extern "C"
  */
 extern void SimplePeripheral_createTask(void);
 
-/*
- * Functions for menu action
- */
-/* Actions for Menu: Choose connection to work with */
-bool SimplePeripheral_doSelectConn(uint8 index);
-
-/* Actions for Menu: Set PHY - Select */
-bool SimplePeripheral_doSetConnPhy(uint8 index);
-
-#ifdef PTM_MODE
-/* Actions for Menu: Enable PTM Mode */
-bool SimplePeripheral_doEnablePTMMode(uint8 index);
-#endif
 /*********************************************************************
 *********************************************************************/
 
