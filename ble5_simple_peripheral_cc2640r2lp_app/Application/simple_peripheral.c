@@ -126,7 +126,6 @@
 #define SP_STATE_CHANGE_EVT                     0
 #define SP_CHAR_CHANGE_EVT                      1
 #define SP_CCFG_CHANGE_EVT                      2
-#define SP_ADV_EVT                              3
 
 // Internal Events for RTOS application
 #define SP_ICALL_EVT                            ICALL_MSG_EVENT_ID // Event_Id_31
@@ -156,28 +155,6 @@ typedef struct
   void    *pData;               // pointer to message
 } spEvt_t;
 
-// Container to store passcode data when passing from gapbondmgr callback
-// to app event. See the pfnPairStateCB_t documentation from the gapbondmgr.h
-// header file for more information on each parameter.
-typedef struct
-{
-  uint8_t state;
-  uint16_t connHandle;
-  uint8_t status;
-} spPairStateData_t;
-
-// Container to store passcode data when passing from gapbondmgr callback
-// to app event. See the pfnPasscodeCB_t documentation from the gapbondmgr.h
-// header file for more information on each parameter.
-typedef struct
-{
-  uint8_t deviceAddr[B_ADDR_LEN];
-  uint16_t connHandle;
-  uint8_t uiInputs;
-  uint8_t uiOutputs;
-  uint32_t numComparison;
-} spPasscodeData_t;
-
 // Container to store advertising event data when passing from advertising
 // callback to app event. See the respective event in GapAdvScan_Event_IDs
 // in gap_advertiser.h for the type that pBuf should be cast to.
@@ -186,14 +163,6 @@ typedef struct
   uint32_t event;
   void *pBuf;
 } spGapAdvEventData_t;
-
-// Container to store information from clock expiration using a flexible array
-// since data is not always needed
-typedef struct
-{
-  uint8_t event;                //
-  uint8_t data[];
-} spClockEventData_t;
 
 // List element for parameter update and PHY command status lists
 typedef struct
@@ -323,7 +292,7 @@ static uint8_t SimplePeripheral_processStackMsg(ICall_Hdr *pMsg);
 static uint8_t SimplePeripheral_processGATTMsg(gattMsgEvent_t *pMsg);
 static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg);
 static void SimplePeripheral_advCallback(uint32_t event, void *pBuf, uintptr_t arg);
-static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData);
+
 static void SimplePeripheral_processAppMsg(spEvt_t *pMsg);
 static void SimplePeripheral_processCharValueChangeEvt(uint8_t paramId);
 static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config);
@@ -690,10 +659,6 @@ static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
       SimplePeripheral_processCharConfigChangeEvt(*(uint8_t*)(pMsg->pData));
       break;
 
-    case SP_ADV_EVT:
-      SimplePeripheral_processAdvEvent((spGapAdvEventData_t*)(pMsg->pData));
-      break;
-
     default:
       // Do nothing.
       break;
@@ -725,26 +690,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 
       if(pPkt->hdr.status == SUCCESS)
       {
-//        // Store the system ID
-//        uint8_t systemId[DEVINFO_SYSTEM_ID_LEN];
-//
-//        // use 6 bytes of device address for 8 bytes of system ID value
-//        systemId[0] = pPkt->devAddr[0];
-//        systemId[1] = pPkt->devAddr[1];
-//        systemId[2] = pPkt->devAddr[2];
-//
-//        // set middle bytes to zero
-//        systemId[4] = 0x00;
-//        systemId[3] = 0x00;
-//
-//        // shift three bytes up
-//        systemId[7] = pPkt->devAddr[5];
-//        systemId[6] = pPkt->devAddr[4];
-//        systemId[5] = pPkt->devAddr[3];
-//
-//        // Set Device Info Service Parameter
-//        DevInfo_SetParameter(DEVINFO_SYSTEM_ID, DEVINFO_SYSTEM_ID_LEN, systemId);
-
         // Temporary memory for advertising parameters for set #1. These will be copied
         // by the GapAdv module
         GapAdv_params_t advParamLegacy = GAPADV_PARAMS_LEGACY_SCANN_CONN;
@@ -942,37 +887,11 @@ static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config)
  */
 static void SimplePeripheral_advCallback(uint32_t event, void *pBuf, uintptr_t arg)
 {
-  spGapAdvEventData_t *pData = ICall_malloc(sizeof(spGapAdvEventData_t));
-
-  if (pData)
+  if (event != GAP_EVT_INSUFFICIENT_MEMORY)
   {
-    pData->event = event;
-    pData->pBuf = pBuf;
-
-    if(SimplePeripheral_enqueueMsg(SP_ADV_EVT, pData) != SUCCESS)
-    {
-      ICall_free(pData);
-    }
+    ICall_free(pBuf);
   }
 }
-
-/*********************************************************************
- * @fn      SimplePeripheral_processAdvEvent
- *
- * @brief   Process advertising event in app context
- *
- * @param   pEventData
- */
-static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData)
-{
-  // All events have associated memory to free except the insufficient memory
-  // event
-  if (pEventData->event != GAP_EVT_INSUFFICIENT_MEMORY)
-  {
-    ICall_free(pEventData->pBuf);
-  }
-}
-
 
 /*********************************************************************
  * @fn      SimplePeripheral_enqueueMsg
