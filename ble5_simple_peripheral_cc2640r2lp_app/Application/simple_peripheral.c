@@ -119,7 +119,7 @@
 #define DEFAULT_DESIRED_CONN_TIMEOUT          300
 
 // Pass parameter updates to the app for it to decide.
-#define DEFAULT_PARAM_UPDATE_REQ_DECISION     GAP_UPDATE_REQ_PASS_TO_APP
+#define DEFAULT_PARAM_UPDATE_REQ_DECISION     GAP_UPDATE_REQ_ACCEPT_ALL // GAP_UPDATE_REQ_PASS_TO_APP
 
 // How often to perform periodic event (in ms)
 #define SP_PERIODIC_EVT_PERIOD               5000
@@ -147,7 +147,7 @@
 #define SP_PASSCODE_EVT                      5
 #define SP_PERIODIC_EVT                      6
 #define SP_READ_RPA_EVT                      7
-#define SP_SEND_PARAM_UPDATE_EVT             8
+// #define SP_SEND_PARAM_UPDATE_EVT             8
 #define SP_CONN_EVT                          9
 
 
@@ -239,8 +239,8 @@ typedef struct
 typedef struct
 {
   uint16_t         	    connHandle;                        // Connection Handle
-  spClockEventData_t*   pParamUpdateEventData;
-  Clock_Struct*    	    pUpdateClock;                      // pointer to clock struct
+  // spClockEventData_t*   pParamUpdateEventData;
+  // Clock_Struct*    	    pUpdateClock;                      // pointer to clock struct
   int8_t           	    rssiArr[SP_MAX_RSSI_STORE_DEPTH];
   uint8_t          	    rssiCntr;
   int8_t           	    rssiAvg;
@@ -303,7 +303,7 @@ static uint16_t menuConnHandle = CONNHANDLE_INVALID;
 static List_List setPhyCommStatList;
 
 // List to store connection handles for queued param updates
-static List_List paramUpdateList;
+// static List_List paramUpdateList;
 
 // GAP GATT Attributes
 static uint8_t attDeviceName[GAP_DEVICE_NAME_LEN] = "Simple Peripheral";
@@ -410,8 +410,8 @@ static void SimplePeripheral_passcodeCb(uint8_t *pDeviceAddr, uint16_t connHandl
 static void SimplePeripheral_pairStateCb(uint16_t connHandle, uint8_t state,
                                          uint8_t status);
 #endif
-static void SimplePeripheral_processPairState(spPairStateData_t *pPairState);
-static void SimplePeripheral_processPasscode(spPasscodeData_t *pPasscodeData);
+
+
 static void SimplePeripheral_charValueChangeCB(uint8_t paramId);
 void SimplePeripheral_charConfigChangeCB(uint8_t config);
 static status_t SimplePeripheral_enqueueMsg(uint8_t event, void *pData);
@@ -422,7 +422,6 @@ static void SimplePeripheral_updatePHYStat(uint16_t eventCode, uint8_t *pMsg);
 static uint8_t SimplePeripheral_addConn(uint16_t connHandle);
 static uint8_t SimplePeripheral_getConnIndex(uint16_t connHandle);
 static uint8_t SimplePeripheral_removeConn(uint16_t connHandle);
-static void SimplePeripheral_processParamUpdate(uint16_t connHandle);
 static status_t SimplePeripheral_startAutoPhyChange(uint16_t connHandle);
 static status_t SimplePeripheral_stopAutoPhyChange(uint16_t connHandle);
 static status_t SimplePeripheral_setPhy(uint16_t connHandle, uint8_t allPhys,
@@ -843,14 +842,6 @@ static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
       SimplePeripheral_processAdvEvent((spGapAdvEventData_t*)(pMsg->pData));
       break;
 
-    case SP_PAIR_STATE_EVT:
-      SimplePeripheral_processPairState((spPairStateData_t*)(pMsg->pData));
-      break;
-
-    case SP_PASSCODE_EVT:
-      SimplePeripheral_processPasscode((spPasscodeData_t*)(pMsg->pData));
-      break;
-
     case SP_PERIODIC_EVT:
       SimplePeripheral_performPeriodicTask();
       break;
@@ -860,18 +851,6 @@ static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
       SimplePeripheral_updateRPA();
       break;
 #endif // PRIVACY_1_2_CFG
-
-    case SP_SEND_PARAM_UPDATE_EVT:
-    {
-      // Extract connection handle from data
-      uint16_t connHandle = *(uint16_t *)(((spClockEventData_t *)pMsg->pData)->data);
-
-      SimplePeripheral_processParamUpdate(connHandle);
-
-      // This data is not dynamically allocated
-      dealloc = FALSE;
-      break;
-    }
 
     case SP_CONN_EVT:
       SimplePeripheral_processConnEvt((Gap_ConnEventRpt_t *)(pMsg->pData));
@@ -1047,7 +1026,7 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 
       break;
     }
-
+/*
     case GAP_UPDATE_LINK_PARAM_REQ_EVENT:
     {
       gapUpdateLinkParamReqReply_t rsp;
@@ -1075,43 +1054,7 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
       VOID GAP_UpdateLinkParamReqReply(&rsp);
 
       break;
-    }
-
-    case GAP_LINK_PARAM_UPDATE_EVENT:
-    {
-      gapLinkUpdateEvent_t *pPkt = (gapLinkUpdateEvent_t *)pMsg;
-
-      // Get the address from the connection handle
-      linkDBInfo_t linkInfo;
-      linkDB_GetInfo(pPkt->connectionHandle, &linkInfo);
-
-      if(pPkt->status == SUCCESS)
-      {
-        // Display the address of the connection update
-//        Display_printf(dispHandle, SP_ROW_STATUS_2, 0, "Link Param Updated: %s",
-//                       Util_convertBdAddr2Str(linkInfo.addr));
-      }
-      else
-      {
-        // Display the address of the connection update failure
-//        Display_printf(dispHandle, SP_ROW_STATUS_2, 0,
-//                       "Link Param Update Failed 0x%x: %s", pPkt->opcode,
-//                       Util_convertBdAddr2Str(linkInfo.addr));
-      }
-
-      // Check if there are any queued parameter updates
-      spConnHandleEntry_t *connHandleEntry = (spConnHandleEntry_t *)List_get(&paramUpdateList);
-      if (connHandleEntry != NULL)
-      {
-        // Attempt to send queued update now
-        SimplePeripheral_processParamUpdate(connHandleEntry->connHandle);
-
-        // Free list element
-        ICall_free(connHandleEntry);
-      }
-
-      break;
-    }
+    } */
 
     default:
       break;
@@ -1316,11 +1259,6 @@ static void SimplePeripheral_clockHandler(UArg arg)
    // Post event to read the current RPA
    SimplePeripheral_enqueueMsg(SP_READ_RPA_EVT, NULL);
  }
- else if (pData->event == SP_SEND_PARAM_UPDATE_EVT)
- {
-    // Send message to app
-    SimplePeripheral_enqueueMsg(SP_SEND_PARAM_UPDATE_EVT, pData);
- }
 }
 
 /*********************************************************************
@@ -1456,85 +1394,6 @@ static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData)
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_processPairState
- *
- * @brief   Process the new paring state.
- *
- * @return  none
- */
-static void SimplePeripheral_processPairState(spPairStateData_t *pPairData)
-{
-  uint8_t state = pPairData->state;
-  uint8_t status = pPairData->status;
-
-  switch (state)
-  {
-    case GAPBOND_PAIRING_STATE_STARTED:
-      // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Pairing started");
-      break;
-
-    case GAPBOND_PAIRING_STATE_COMPLETE:
-      if (status == SUCCESS)
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Pairing success");
-      }
-      else
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Pairing fail: %d", status);
-      }
-      break;
-
-    case GAPBOND_PAIRING_STATE_ENCRYPTED:
-      if (status == SUCCESS)
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Encryption success");
-      }
-      else
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Encryption failed: %d", status);
-      }
-      break;
-
-    case GAPBOND_PAIRING_STATE_BOND_SAVED:
-      if (status == SUCCESS)
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Bond save success");
-      }
-      else
-      {
-        // Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Bond save failed: %d", status);
-      }
-      break;
-
-    default:
-      break;
-  }
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_processPasscode
- *
- * @brief   Process the Passcode request.
- *
- * @return  none
- */
-static void SimplePeripheral_processPasscode(spPasscodeData_t *pPasscodeData)
-{
-  // Display passcode to user
-  if (pPasscodeData->uiOutputs != 0)
-  {
-//    Display_printf(dispHandle, SP_ROW_CONNECTION, 0, "Passcode: %d",
-//                   B_APP_DEFAULT_PASSCODE);
-  }
-
-#if defined(GAP_BOND_MGR)
-  // Send passcode response
-  GAPBondMgr_PasscodeRsp(pPasscodeData->connHandle , SUCCESS,
-                         B_APP_DEFAULT_PASSCODE);
-#endif
-}
-
-/*********************************************************************
  * @fn      SimplePeripheral_connEvtCB
  *
  * @brief   Connection event callback.
@@ -1640,35 +1499,6 @@ static uint8_t SimplePeripheral_addConn(uint16_t connHandle)
       // Found available entry to put a new connection info in
       connList[i].connHandle = connHandle;
 
-      // Allocate data to send through clock handler
-      connList[i].pParamUpdateEventData = ICall_malloc(sizeof(spClockEventData_t) +
-                                                       sizeof (uint16_t));
-      if(connList[i].pParamUpdateEventData)
-      {
-        connList[i].pParamUpdateEventData->event = SP_SEND_PARAM_UPDATE_EVT;
-        *((uint16_t *)connList[i].pParamUpdateEventData->data) = connHandle;
-
-        // Create a clock object and start
-        connList[i].pUpdateClock
-          = (Clock_Struct*) ICall_malloc(sizeof(Clock_Struct));
-
-        if (connList[i].pUpdateClock)
-        {
-          Util_constructClock(connList[i].pUpdateClock,
-                              SimplePeripheral_clockHandler,
-                              SP_SEND_PARAM_UPDATE_DELAY, 0, true,
-                              (UArg) (connList[i].pParamUpdateEventData));
-        }
-        else
-        {
-            ICall_free(connList[i].pParamUpdateEventData);
-        }
-      }
-      else
-      {
-        status = bleMemAllocError;
-      }
-
       // Set default PHY to 1M
       connList[i].currPhy = HCI_PHY_1_MBPS;
 
@@ -1747,28 +1577,6 @@ static uint8_t SimplePeripheral_clearConnListEntry(uint16_t connHandle)
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_clearPendingParamUpdate
- *
- * @brief   clean pending param update request in the paramUpdateList list
- *
- * @param   connHandle - connection handle to clean
- *
- * @return  none
- */
-void SimplePeripheral_clearPendingParamUpdate(uint16_t connHandle)
-{
-  List_Elem *curr;
-
-  for (curr = List_head(&paramUpdateList); curr != NULL; curr = List_next(curr)) 
-  {
-    if (((spConnHandleEntry_t *)curr)->connHandle == connHandle)
-    {
-      List_remove(&paramUpdateList, curr);
-    }
-  }
-}
-
-/*********************************************************************
  * @fn      SimplePeripheral_removeConn
  *
  * @brief   Remove a device from the connected device list
@@ -1783,25 +1591,6 @@ static uint8_t SimplePeripheral_removeConn(uint16_t connHandle)
 
   if(connIndex != MAX_NUM_BLE_CONNS)
   {
-    Clock_Struct* pUpdateClock = connList[connIndex].pUpdateClock;
-
-    if (pUpdateClock != NULL)
-    {
-      // Stop and destruct the RTOS clock if it's still alive
-      if (Util_isActive(pUpdateClock))
-      {
-        Util_stopClock(pUpdateClock);
-      }
-
-      // Destruct the clock object
-      Clock_destruct(pUpdateClock);
-      // Free clock struct
-      ICall_free(pUpdateClock);
-      // Free ParamUpdateEventData
-      ICall_free(connList[connIndex].pParamUpdateEventData);
-    }
-    // Clear pending update requests from paramUpdateList
-    SimplePeripheral_clearPendingParamUpdate(connHandle);
     // Stop Auto PHY Change
     SimplePeripheral_stopAutoPhyChange(connHandle);
     // Clear Connection List Entry
@@ -1809,60 +1598,6 @@ static uint8_t SimplePeripheral_removeConn(uint16_t connHandle)
   }
 
   return connIndex;
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_processParamUpdate
- *
- * @brief   Process a parameters update request
- *
- * @return  None
- */
-static void SimplePeripheral_processParamUpdate(uint16_t connHandle)
-{
-  gapUpdateLinkParamReq_t req;
-  uint8_t connIndex;
-
-  req.connectionHandle = connHandle;
-  req.connLatency = DEFAULT_DESIRED_SLAVE_LATENCY;
-  req.connTimeout = DEFAULT_DESIRED_CONN_TIMEOUT;
-  req.intervalMin = DEFAULT_DESIRED_MIN_CONN_INTERVAL;
-  req.intervalMax = DEFAULT_DESIRED_MAX_CONN_INTERVAL;
-
-  connIndex = SimplePeripheral_getConnIndex(connHandle);
-  if (connIndex >= MAX_NUM_BLE_CONNS)
-  {
-    // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Connection handle is not in the connList !!!");
-    return;
-  }
-
-
-  // Deconstruct the clock object
-  Clock_destruct(connList[connIndex].pUpdateClock);
-  // Free clock struct, only in case it is not NULL
-  if (connList[connIndex].pUpdateClock != NULL)
-  {
-    ICall_free(connList[connIndex].pUpdateClock);
-    connList[connIndex].pUpdateClock = NULL;
-  }
-  // Free ParamUpdateEventData, only in case it is not NULL
-  if (connList[connIndex].pParamUpdateEventData != NULL)
-    ICall_free(connList[connIndex].pParamUpdateEventData);
-
-  // Send parameter update
-  bStatus_t status = GAP_UpdateLinkParamReq(&req);
-
-  // If there is an ongoing update, queue this for when the udpate completes
-  if (status == bleAlreadyInRequestedMode)
-  {
-    spConnHandleEntry_t *connHandleEntry = ICall_malloc(sizeof(spConnHandleEntry_t));
-    if (connHandleEntry)
-    {
-      connHandleEntry->connHandle = connHandle;
-
-      List_put(&paramUpdateList, (List_Elem *)connHandleEntry);
-    }
-  }
 }
 
 /*********************************************************************
