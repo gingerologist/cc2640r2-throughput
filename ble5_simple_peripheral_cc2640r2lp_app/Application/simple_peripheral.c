@@ -694,7 +694,7 @@ static void SimplePeripheral_init(void)
   params.mode           = GPT_MODE_PERIODIC;
   params.direction      = GPTimerCC26XX_DIRECTION_UP;
   params.debugStallMode = GPTimerCC26XX_DEBUG_STALL_OFF;
-  hTimer = GPTimerCC26XX_open(CC2640R2DK_5MM_GPTIMER0A, &params);
+  hTimer = GPTimerCC26XX_open(Board_GPTIMER0A, &params); // Board_GPTIMER0A
 }
 
 /*********************************************************************
