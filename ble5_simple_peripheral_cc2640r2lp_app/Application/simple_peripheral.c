@@ -72,7 +72,6 @@
 /* This Header file contains all BLE API and icall structure definition */
 #include <icall_ble_api.h>
 
-// #include <devinfoservice.h>
 #include <simple_gatt_profile.h>
 
 #ifdef USE_RCOSC
@@ -123,8 +122,6 @@
 #endif
 
 // Application events
-#define SP_STATE_CHANGE_EVT                     0
-#define SP_CHAR_CHANGE_EVT                      1
 #define SP_CCFG_CHANGE_EVT                      2
 
 // Internal Events for RTOS application
@@ -137,8 +134,6 @@
 
 // Size of string-converted device address ("0xXXXXXXXXXXXX")
 #define SP_ADDR_STR_SIZE                        15
-
-#define AUTO_PHY_UPDATE                         0xFF
 
 // Spin if the expression is not true
 #define SIMPLEPERIPHERAL_ASSERT(expr) if (!(expr)) simple_peripheral_spin();
@@ -154,22 +149,6 @@ typedef struct
   uint8_t event;                // event type
   void    *pData;               // pointer to message
 } spEvt_t;
-
-// Container to store advertising event data when passing from advertising
-// callback to app event. See the respective event in GapAdvScan_Event_IDs
-// in gap_advertiser.h for the type that pBuf should be cast to.
-typedef struct
-{
-  uint32_t event;
-  void *pBuf;
-} spGapAdvEventData_t;
-
-// List element for parameter update and PHY command status lists
-typedef struct
-{
-  List_Elem elem;
-  uint16_t  connHandle;
-} spConnHandleEntry_t;
 
 // Connected device information
 typedef struct
@@ -287,23 +266,17 @@ void timerCallback(GPTimerCC26XX_Handle handle, GPTimerCC26XX_IntMask interruptM
 
 static void SimplePeripheral_init( void );
 static void SimplePeripheral_taskFxn(UArg a0, UArg a1);
-
 static uint8_t SimplePeripheral_processStackMsg(ICall_Hdr *pMsg);
 static uint8_t SimplePeripheral_processGATTMsg(gattMsgEvent_t *pMsg);
 static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg);
 static void SimplePeripheral_advCallback(uint32_t event, void *pBuf, uintptr_t arg);
-
 static void SimplePeripheral_processAppMsg(spEvt_t *pMsg);
-static void SimplePeripheral_processCharValueChangeEvt(uint8_t paramId);
 static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config);
-
-static void SimplePeripheral_charValueChangeCB(uint8_t paramId);
 void SimplePeripheral_charConfigChangeCB(uint8_t config);
 static status_t SimplePeripheral_enqueueMsg(uint8_t event, void *pData);
 static uint8_t SimplePeripheral_addConn(uint16_t connHandle);
 static uint8_t SimplePeripheral_getConnIndex(uint16_t connHandle);
 static uint8_t SimplePeripheral_removeConn(uint16_t connHandle);
-
 static uint8_t SimplePeripheral_clearConnListEntry(uint16_t connHandle);
 
 /*********************************************************************
@@ -314,12 +287,6 @@ extern void AssertHandler(uint8 assertCause, uint8 assertSubcause);
 /*********************************************************************
  * PROFILE CALLBACKS
  */
-
-// Simple GATT Profile Callbacks
-static simpleProfileCBs_t SimplePeripheral_simpleProfileCBs =
-{
-  SimplePeripheral_charValueChangeCB, // Simple GATT Characteristic value change callback
-};
 
 /*********************************************************************
  * PUBLIC FUNCTIONS
@@ -400,7 +367,6 @@ static void SimplePeripheral_init(void)
   // Initialize GATT attributes
   GGS_AddService(GATT_ALL_SERVICES);           // GAP GATT Service
   GATTServApp_AddService(GATT_ALL_SERVICES);   // GATT Service
-  // DevInfo_AddService();                        // Device Information Service
   SimpleProfile_AddService(GATT_ALL_SERVICES); // Simple GATT Profile
 
   // Setup the SimpleProfile Characteristic Values
@@ -424,9 +390,6 @@ static void SimplePeripheral_init(void)
     SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR5, SIMPLEPROFILE_CHAR5_LEN,
                                charValue5);
   }
-
-  // Register callback with SimpleGATTprofile
-  SimpleProfile_RegisterAppCBs(&SimplePeripheral_simpleProfileCBs);
 
   // Register with GAP for HCI/Host messages. This is needed to receive HCI
   // events. For more information, see the HCI section in the User's Guide:
@@ -651,10 +614,6 @@ static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
 
   switch (pMsg->event)
   {
-    case SP_CHAR_CHANGE_EVT:
-      SimplePeripheral_processCharValueChangeEvt(*(uint8_t*)(pMsg->pData));
-      break;
-
     case SP_CCFG_CHANGE_EVT:
       SimplePeripheral_processCharConfigChangeEvt(*(uint8_t*)(pMsg->pData));
       break;
@@ -767,31 +726,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_charValueChangeCB
- *
- * @brief   Callback from Simple Profile indicating a characteristic
- *          value change.
- *
- * @param   paramId - parameter Id of the value that was changed.
- *
- * @return  None.
- */
-static void SimplePeripheral_charValueChangeCB(uint8_t paramId)
-{
-  uint8_t *pValue = ICall_malloc(sizeof(uint8_t));
-
-  if (pValue)
-  {
-    *pValue = paramId;
-
-    if (SimplePeripheral_enqueueMsg(SP_CHAR_CHANGE_EVT, pValue) != SUCCESS)
-    {
-      ICall_free(pValue);
-    }
-  }
-}
-
-/*********************************************************************
  * @fn      SimplePeripheral_charConfigChangeCB
  *
  * @brief   Callback from Simple Profile indicating a characteristic
@@ -817,39 +751,7 @@ void SimplePeripheral_charConfigChangeCB(uint8_t config)
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_processCharValueChangeEvt
- *
- * @brief   Process a pending Simple Profile characteristic value change
- *          event.
- *
- * @param   paramID - parameter ID of the value that was changed.
- */
-static void SimplePeripheral_processCharValueChangeEvt(uint8_t paramId)
-{
-  uint8_t newValue;
-
-  switch(paramId)
-  {
-    case SIMPLEPROFILE_CHAR1:
-      SimpleProfile_GetParameter(SIMPLEPROFILE_CHAR1, &newValue);
-
-      // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Char 1: %d", (uint16_t)newValue);
-      break;
-
-    case SIMPLEPROFILE_CHAR3:
-      SimpleProfile_GetParameter(SIMPLEPROFILE_CHAR3, &newValue);
-
-      // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Char 3: %d", (uint16_t)newValue);
-      break;
-
-    default:
-      // should not reach here!
-      break;
-  }
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_processCharValueChangeEvt
+ * @fn      SimplePeripheral_processCharConfigChangeEvt
  *
  * @brief   Process a pending Simple Profile characteristic value change
  *          event.
