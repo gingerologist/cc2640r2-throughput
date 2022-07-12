@@ -125,7 +125,7 @@
 #define SP_PERIODIC_EVT_PERIOD               5000
 
 // How often to read current current RPA (in ms)
-#define SP_READ_RPA_EVT_PERIOD               3000
+// #define SP_READ_RPA_EVT_PERIOD               3000
 
 // Delay (in ms) after connection establishment before sending a parameter update requst
 #define SP_SEND_PARAM_UPDATE_DELAY           6000
@@ -146,7 +146,7 @@
 #define SP_PAIR_STATE_EVT                    4
 #define SP_PASSCODE_EVT                      5
 #define SP_PERIODIC_EVT                      6
-#define SP_READ_RPA_EVT                      7
+// #define SP_READ_RPA_EVT                      7
 // #define SP_SEND_PARAM_UPDATE_EVT             8
 #define SP_CONN_EVT                          9
 
@@ -283,15 +283,15 @@ static Queue_Handle appMsgQueueHandle;
 // GattServApp will handle notifying all connected GATT clients
 static Clock_Struct clkPeriodic;
 // Clock instance for RPA read events.
-static Clock_Struct clkRpaRead;
+// static Clock_Struct clkRpaRead;
 
 // Memory to pass periodic event ID to clock handler
 spClockEventData_t argPeriodic =
 { .event = SP_PERIODIC_EVT };
 
 // Memory to pass RPA read event ID to clock handler
-spClockEventData_t argRpaRead =
-{ .event = SP_READ_RPA_EVT };
+//spClockEventData_t argRpaRead =
+//{ .event = SP_READ_RPA_EVT };
 
 // Per-handle connection info
 static spConnRec_t connList[MAX_NUM_BLE_CONNS];
@@ -1251,14 +1251,14 @@ static void SimplePeripheral_clockHandler(UArg arg)
    // Post event to wake up the application
    SimplePeripheral_enqueueMsg(SP_PERIODIC_EVT, NULL);
  }
- else if (pData->event == SP_READ_RPA_EVT)
- {
-   // Start the next period
-   Util_startClock(&clkRpaRead);
-
-   // Post event to read the current RPA
-   SimplePeripheral_enqueueMsg(SP_READ_RPA_EVT, NULL);
- }
+// else if (pData->event == SP_READ_RPA_EVT)
+// {
+//   // Start the next period
+//   Util_startClock(&clkRpaRead);
+//
+//   // Post event to read the current RPA
+//   SimplePeripheral_enqueueMsg(SP_READ_RPA_EVT, NULL);
+// }
 }
 
 /*********************************************************************
