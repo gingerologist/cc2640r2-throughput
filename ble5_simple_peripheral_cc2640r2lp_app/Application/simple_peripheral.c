@@ -83,12 +83,6 @@
 
 #include "simple_peripheral.h"
 
-#ifdef PTM_MODE
-#include "npi_task.h"              // To allow RX event registration
-#include "npi_ble.h"               // To enable transmission of messages to UART
-#include "icall_hci_tl.h"          // To allow ICall HCI Transport Layer
-#endif // PTM_MODE
-
 /*********************************************************************
  * MACROS
  */
@@ -121,9 +115,6 @@
 // Pass parameter updates to the app for it to decide.
 #define DEFAULT_PARAM_UPDATE_REQ_DECISION     GAP_UPDATE_REQ_ACCEPT_ALL // GAP_UPDATE_REQ_PASS_TO_APP
 
-// How often to perform periodic event (in ms)
-#define SP_PERIODIC_EVT_PERIOD               5000
-
 // How often to read current current RPA (in ms)
 // #define SP_READ_RPA_EVT_PERIOD               3000
 
@@ -143,11 +134,7 @@
 #define SP_CCFG_CHANGE_EVT                   10
 
 #define SP_ADV_EVT                           3
-#define SP_PAIR_STATE_EVT                    4
-#define SP_PASSCODE_EVT                      5
-#define SP_PERIODIC_EVT                      6
-// #define SP_READ_RPA_EVT                      7
-// #define SP_SEND_PARAM_UPDATE_EVT             8
+
 #define SP_CONN_EVT                          9
 
 
@@ -238,9 +225,7 @@ typedef struct
 // Connected device information
 typedef struct
 {
-  uint16_t         	    connHandle;                        // Connection Handle
-  // spClockEventData_t*   pParamUpdateEventData;
-  // Clock_Struct*    	    pUpdateClock;                      // pointer to clock struct
+  uint16_t         	    connHandle;                        // Connection Handle                   // pointer to clock struct
   int8_t           	    rssiArr[SP_MAX_RSSI_STORE_DEPTH];
   uint8_t          	    rssiCntr;
   int8_t           	    rssiAvg;
@@ -282,12 +267,6 @@ static Queue_Handle appMsgQueueHandle;
 // Clock instance for internal periodic events. Only one is needed since
 // GattServApp will handle notifying all connected GATT clients
 static Clock_Struct clkPeriodic;
-// Clock instance for RPA read events.
-// static Clock_Struct clkRpaRead;
-
-// Memory to pass periodic event ID to clock handler
-spClockEventData_t argPeriodic =
-{ .event = SP_PERIODIC_EVT };
 
 // Memory to pass RPA read event ID to clock handler
 //spClockEventData_t argRpaRead =
@@ -366,11 +345,6 @@ static uint8 advHandleLegacy;
 // Address mode
 static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
 
-#if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
-// Current Random Private Address
-static uint8 rpa[B_ADDR_LEN] = {0};
-#endif // PRIVACY_1_2_CFG
-
 static volatile uint8_t ccfg = 0;
 static uint8_t charValue4[SIMPLEPROFILE_CHAR4_LEN] = {0};
 
@@ -398,19 +372,6 @@ static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData);
 static void SimplePeripheral_processAppMsg(spEvt_t *pMsg);
 static void SimplePeripheral_processCharValueChangeEvt(uint8_t paramId);
 static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config);
-static void SimplePeripheral_performPeriodicTask(void);
-#if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
-static void SimplePeripheral_updateRPA(void);
-#endif // PRIVACY_1_2_CFG
-static void SimplePeripheral_clockHandler(UArg arg);
-#if defined(GAP_BOND_MGR)
-static void SimplePeripheral_passcodeCb(uint8_t *pDeviceAddr, uint16_t connHandle,
-                                        uint8_t uiInputs, uint8_t uiOutputs,
-                                        uint32_t numComparison);
-static void SimplePeripheral_pairStateCb(uint16_t connHandle, uint8_t state,
-                                         uint8_t status);
-#endif
-
 
 static void SimplePeripheral_charValueChangeCB(uint8_t paramId);
 void SimplePeripheral_charConfigChangeCB(uint8_t config);
@@ -509,10 +470,6 @@ static void SimplePeripheral_init(void)
 
   // Create an RTOS queue for message from profile to be sent to app.
   appMsgQueueHandle = Util_constructQueue(&appMsgQueue);
-
-  // Create one-shot clock for internal periodic events.
-  Util_constructClock(&clkPeriodic, SimplePeripheral_clockHandler,
-                      SP_PERIODIC_EVT_PERIOD, 0, false, (UArg)&argPeriodic);
 
   // Set the Device Name characteristic in the GAP GATT Service
   // For more information, see the section in the User's Guide:
@@ -842,16 +799,6 @@ static void SimplePeripheral_processAppMsg(spEvt_t *pMsg)
       SimplePeripheral_processAdvEvent((spGapAdvEventData_t*)(pMsg->pData));
       break;
 
-    case SP_PERIODIC_EVT:
-      SimplePeripheral_performPeriodicTask();
-      break;
-
-#if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
-    case SP_READ_RPA_EVT:
-      SimplePeripheral_updateRPA();
-      break;
-#endif // PRIVACY_1_2_CFG
-
     case SP_CONN_EVT:
       SimplePeripheral_processConnEvt((Gap_ConnEventRpt_t *)(pMsg->pData));
       break;
@@ -906,12 +853,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 
         // Set Device Info Service Parameter
         DevInfo_SetParameter(DEVINFO_SYSTEM_ID, DEVINFO_SYSTEM_ID_LEN, systemId);
-
-        // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Initialized");
-
-        // Setup and start Advertising
-        // For more information, see the GAP section in the User's Guide:
-        // http://software-dl.ti.com/lprf/ble5stack-latest/
 
         // Temporary memory for advertising parameters for set #1. These will be copied
         // by the GapAdv module
@@ -1026,35 +967,6 @@ static void SimplePeripheral_processGapMessage(gapEventHdr_t *pMsg)
 
       break;
     }
-/*
-    case GAP_UPDATE_LINK_PARAM_REQ_EVENT:
-    {
-      gapUpdateLinkParamReqReply_t rsp;
-
-      gapUpdateLinkParamReqEvent_t *pReq = (gapUpdateLinkParamReqEvent_t *)pMsg;
-
-      rsp.connectionHandle = pReq->req.connectionHandle;
-
-      // Only accept connection intervals with slave latency of 0
-      // This is just an example of how the application can send a response
-      if(pReq->req.connLatency == 0)
-      {
-        rsp.intervalMin = pReq->req.intervalMin;
-        rsp.intervalMax = pReq->req.intervalMax;
-        rsp.connLatency = pReq->req.connLatency;
-        rsp.connTimeout = pReq->req.connTimeout;
-        rsp.accepted = TRUE;
-      }
-      else
-      {
-        rsp.accepted = FALSE;
-      }
-
-      // Send Reply
-      VOID GAP_UpdateLinkParamReqReply(&rsp);
-
-      break;
-    } */
 
     default:
       break;
@@ -1174,94 +1086,6 @@ static void SimplePeripheral_processCharConfigChangeEvt(uint8_t config)
 }
 
 /*********************************************************************
- * @fn      SimplePeripheral_performPeriodicTask
- *
- * @brief   Perform a periodic application task. This function gets called
- *          every five seconds (SP_PERIODIC_EVT_PERIOD). In this example,
- *          the value of the third characteristic in the SimpleGATTProfile
- *          service is retrieved from the profile, and then copied into the
- *          value of the the fourth characteristic.
- *
- * @param   None.
- *
- * @return  None.
- */
-static void SimplePeripheral_performPeriodicTask(void)
-{
-  uint8_t valueToCopy;
-
-  // Call to retrieve the value of the third characteristic in the profile
-  if (SimpleProfile_GetParameter(SIMPLEPROFILE_CHAR3, &valueToCopy) == SUCCESS)
-  {
-    // Call to set that value of the fourth characteristic in the profile.
-    // Note that if notifications of the fourth characteristic have been
-    // enabled by a GATT client device, then a notification will be sent
-    // every time this function is called.
-    SimpleProfile_SetParameter(SIMPLEPROFILE_CHAR4, sizeof(uint8_t),
-                               &valueToCopy);
-  }
-}
-
-#if defined(BLE_V42_FEATURES) && (BLE_V42_FEATURES & PRIVACY_1_2_CFG)
-/*********************************************************************
- * @fn      SimplePeripheral_updateRPA
- *
- * @brief   Read the current RPA from the stack and update display
- *          if the RPA has changed.
- *
- * @param   None.
- *
- * @return  None.
- */
-static void SimplePeripheral_updateRPA(void)
-{
-  uint8_t* pRpaNew;
-
-  // Read the current RPA.
-  pRpaNew = GAP_GetDevAddress(FALSE);
-
-  if (memcmp(pRpaNew, rpa, B_ADDR_LEN))
-  {
-    // If the RPA has changed, update the display
-//    Display_printf(dispHandle, SP_ROW_RPA, 0, "RP Addr: %s",
-//                   Util_convertBdAddr2Str(pRpaNew));
-    memcpy(rpa, pRpaNew, B_ADDR_LEN);
-  }
-}
-#endif // PRIVACY_1_2_CFG
-
-/*********************************************************************
- * @fn      SimplePeripheral_clockHandler
- *
- * @brief   Handler function for clock timeouts.
- *
- * @param   arg - event type
- *
- * @return  None.
- */
-static void SimplePeripheral_clockHandler(UArg arg)
-{
-  spClockEventData_t *pData = (spClockEventData_t *)arg;
-
- if (pData->event == SP_PERIODIC_EVT)
- {
-   // Start the next period
-   Util_startClock(&clkPeriodic);
-
-   // Post event to wake up the application
-   SimplePeripheral_enqueueMsg(SP_PERIODIC_EVT, NULL);
- }
-// else if (pData->event == SP_READ_RPA_EVT)
-// {
-//   // Start the next period
-//   Util_startClock(&clkRpaRead);
-//
-//   // Post event to read the current RPA
-//   SimplePeripheral_enqueueMsg(SP_READ_RPA_EVT, NULL);
-// }
-}
-
-/*********************************************************************
  * @fn      SimplePeripheral_doSetConnPhy
  *
  * @brief   Set PHY preference.
@@ -1366,14 +1190,7 @@ static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData)
       break;
 
     case GAP_EVT_ADV_SET_TERMINATED:
-    {
-//#ifndef Display_DISABLE_ALL
-//      GapAdv_setTerm_t *advSetTerm = (GapAdv_setTerm_t *)(pEventData->pBuf);
-//#endif
-//      Display_printf(dispHandle, SP_ROW_ADVSTATE, 0, "Adv Set %d disabled after conn %d",
-//                     advSetTerm->handle, advSetTerm->connHandle );
-    }
-    break;
+      break;
 
     case GAP_EVT_SCAN_REQ_RECEIVED:
       break;
@@ -1423,7 +1240,6 @@ static void SimplePeripheral_processConnEvt(Gap_ConnEventRpt_t *pReport)
 
   if (connIndex >= MAX_NUM_BLE_CONNS)
   {
-    // Display_printf(dispHandle, SP_ROW_STATUS_1, 0, "Connection handle is not in the connList !!!");
     return;
   }
 
