@@ -362,7 +362,6 @@ static uint8_t scanRspData[] =
 
 // Advertising handles
 static uint8 advHandleLegacy;
-static uint8 advHandleLongRange;
 
 // Address mode
 static GAP_Addr_Modes_t addrMode = DEFAULT_ADDRESS_MODE;
@@ -433,10 +432,6 @@ static uint8_t SimplePeripheral_clearConnListEntry(uint16_t connHandle);
 
 static void SimplePeripheral_connEvtCB(Gap_ConnEventRpt_t *pReport);
 static void SimplePeripheral_processConnEvt(Gap_ConnEventRpt_t *pReport);
-#ifdef PTM_MODE
-void simple_peripheral_handleNPIRxInterceptEvent(uint8_t *pMsg);      // Declaration
-static void simple_peripheral_sendToNPI(uint8_t *buf, uint16_t len);  // Declaration
-#endif // PTM_MODE
 
 /*********************************************************************
  * EXTERN FUNCTIONS
@@ -446,15 +441,6 @@ extern void AssertHandler(uint8 assertCause, uint8 assertSubcause);
 /*********************************************************************
  * PROFILE CALLBACKS
  */
-
-#if defined(GAP_BOND_MGR)
-// GAP Bond Manager Callbacks
-static gapBondCBs_t SimplePeripheral_BondMgrCBs =
-{
-  SimplePeripheral_passcodeCb,       // Passcode callback
-  SimplePeripheral_pairStateCb       // Pairing/Bonding state Callback
-};
-#endif
 
 // Simple GATT Profile Callbacks
 static simpleProfileCBs_t SimplePeripheral_simpleProfileCBs =
@@ -482,59 +468,6 @@ static void simple_peripheral_spin(void)
     x++;
   }
 }
-
-#ifdef PTM_MODE
-/*********************************************************************
-* @fn      simple_peripheral_handleNPIRxInterceptEvent
-*
-* @brief   Intercept an NPI RX serial message and queue for this application.
-*
-* @param   pMsg - a NPIMSG_msg_t containing the intercepted message.
-*
-* @return  none.
-*/
-void simple_peripheral_handleNPIRxInterceptEvent(uint8_t *pMsg)
-{
- // Send Command via HCI TL
- HCI_TL_SendToStack(((NPIMSG_msg_t *)pMsg)->pBuf);
-
- // The data is stored as a message, free this first.
- ICall_freeMsg(((NPIMSG_msg_t *)pMsg)->pBuf);
-
- // Free container.
- ICall_free(pMsg);
-}
-
-/*********************************************************************
-* @fn      simple_peripheral_sendToNPI
-*
-* @brief   Create an NPI packet and send to NPI to transmit.
-*
-* @param   buf - pointer HCI event or data.
-*
-* @param   len - length of buf in bytes.
-*
-* @return  none
-*/
-static void simple_peripheral_sendToNPI(uint8_t *buf, uint16_t len)
-{
- npiPkt_t *pNpiPkt = (npiPkt_t *)ICall_allocMsg(sizeof(npiPkt_t) + len);
-
- if (pNpiPkt)
- {
-   pNpiPkt->hdr.event = buf[0]; //Has the event status code in first byte of payload
-   pNpiPkt->hdr.status = 0xFF;
-   pNpiPkt->pktLen = len;
-   pNpiPkt->pData  = (uint8 *)(pNpiPkt + 1);
-
-   memcpy(pNpiPkt->pData, buf, len);
-
-   // Send to NPI
-   // Note: there is no need to free this packet.  NPI will do that itself.
-   NPITask_sendToHost((uint8_t *)pNpiPkt);
- }
-}
-#endif // PTM_MODE
 
 /*********************************************************************
  * @fn      SimplePeripheral_createTask
@@ -595,29 +528,6 @@ static void SimplePeripheral_init(void)
     GAP_SetParamValue(GAP_PARAM_LINK_UPDATE_DECISION, paramUpdateDecision);
   }
 
-#if defined(GAP_BOND_MGR)
-  // Setup the GAP Bond Manager. For more information see the GAP Bond Manager
-  // section in the User's Guide:
-  // http://software-dl.ti.com/lprf/ble5stack-latest/
-  {
-    // Don't send a pairing request after connecting; the peer device must
-    // initiate pairing
-    uint8_t pairMode = GAPBOND_PAIRING_MODE_WAIT_FOR_REQ;
-    // Use authenticated pairing: require passcode.
-    uint8_t mitm = TRUE;
-    // This device has no display capabilities
-    uint8_t ioCap = GAPBOND_IO_CAP_NO_INPUT_NO_OUTPUT;
-    // Request bonding (storing long-term keys for re-encryption upon subsequent
-    // connections without repairing)
-    uint8_t bonding = TRUE;
-
-    GAPBondMgr_SetParameter(GAPBOND_PAIRING_MODE, sizeof(uint8_t), &pairMode);
-    GAPBondMgr_SetParameter(GAPBOND_MITM_PROTECTION, sizeof(uint8_t), &mitm);
-    GAPBondMgr_SetParameter(GAPBOND_IO_CAPABILITIES, sizeof(uint8_t), &ioCap);
-    GAPBondMgr_SetParameter(GAPBOND_BONDING_ENABLED, sizeof(uint8_t), &bonding);
-  }
-#endif
-
   // Initialize GATT attributes
   GGS_AddService(GATT_ALL_SERVICES);           // GAP GATT Service
   GATTServApp_AddService(GATT_ALL_SERVICES);   // GATT Service
@@ -648,11 +558,6 @@ static void SimplePeripheral_init(void)
 
   // Register callback with SimpleGATTprofile
   SimpleProfile_RegisterAppCBs(&SimplePeripheral_simpleProfileCBs);
-
-#if defined(GAP_BOND_MGR)
-  // Start Bond Manager and register callback
-  VOID GAPBondMgr_Register(&SimplePeripheral_BondMgrCBs);
-#endif
 
   // Register with GAP for HCI/Host messages. This is needed to receive HCI
   // events. For more information, see the HCI section in the User's Guide:
@@ -876,45 +781,6 @@ static uint8_t SimplePeripheral_processStackMsg(ICall_Hdr *pMsg)
       // do nothing
       break;
   }
-
-#ifdef PTM_MODE
-  // Check for NPI Messages
-  hciPacket_t *pBuf = (hciPacket_t *)pMsg;
-
-  // Serialized HCI Event
-  if (pBuf->hdr.event == HCI_CTRL_TO_HOST_EVENT)
-  {
-    uint16_t len = 0;
-
-    // Determine the packet length
-    switch(pBuf->pData[0])
-    {
-      case HCI_EVENT_PACKET:
-        len = HCI_EVENT_MIN_LENGTH + pBuf->pData[2];
-        break;
-
-      case HCI_ACL_DATA_PACKET:
-        len = HCI_DATA_MIN_LENGTH + BUILD_UINT16(pBuf->pData[3], pBuf->pData[4]);
-        break;
-
-      default:
-        break;
-    }
-
-    // Send to Remote Host.
-    simple_peripheral_sendToNPI(pBuf->pData, len);
-
-    // Free buffers if needed.
-    switch (pBuf->pData[0])
-    {
-      case HCI_ACL_DATA_PACKET:
-      case HCI_SCO_DATA_PACKET:
-        BM_free(pBuf->pData);
-      default:
-        break;
-    }
-  }
-#endif // PTM_MODE
 
   return (safeToDealloc);
 }
@@ -1588,67 +1454,6 @@ static void SimplePeripheral_processAdvEvent(spGapAdvEventData_t *pEventData)
     ICall_free(pEventData->pBuf);
   }
 }
-
-#if defined(GAP_BOND_MGR)
-/*********************************************************************
- * @fn      SimplePeripheral_pairStateCb
- *
- * @brief   Pairing state callback.
- *
- * @return  none
- */
-static void SimplePeripheral_pairStateCb(uint16_t connHandle, uint8_t state,
-                                         uint8_t status)
-{
-  spPairStateData_t *pData = ICall_malloc(sizeof(spPairStateData_t));
-
-  // Allocate space for the event data.
-  if (pData)
-  {
-    pData->state = state;
-    pData->connHandle = connHandle;
-    pData->status = status;
-
-    // Queue the event.
-    if(SimplePeripheral_enqueueMsg(SP_PAIR_STATE_EVT, pData) != SUCCESS)
-    {
-      ICall_free(pData);
-    }
-  }
-}
-
-/*********************************************************************
- * @fn      SimplePeripheral_passcodeCb
- *
- * @brief   Passcode callback.
- *
- * @return  none
- */
-static void SimplePeripheral_passcodeCb(uint8_t *pDeviceAddr,
-                                        uint16_t connHandle,
-                                        uint8_t uiInputs,
-                                        uint8_t uiOutputs,
-                                        uint32_t numComparison)
-{
-  spPasscodeData_t *pData = ICall_malloc(sizeof(spPasscodeData_t));
-
-  // Allocate space for the passcode event.
-  if (pData )
-  {
-    pData->connHandle = connHandle;
-    memcpy(pData->deviceAddr, pDeviceAddr, B_ADDR_LEN);
-    pData->uiInputs = uiInputs;
-    pData->uiOutputs = uiOutputs;
-    pData->numComparison = numComparison;
-
-    // Enqueue the event.
-    if(SimplePeripheral_enqueueMsg(SP_PASSCODE_EVT, pData) != SUCCESS)
-    {
-      ICall_free(pData);
-    }
-  }
-}
-#endif
 
 /*********************************************************************
  * @fn      SimplePeripheral_processPairState
@@ -2389,50 +2194,5 @@ static void SimplePeripheral_updatePHYStat(uint16_t eventCode, uint8_t *pMsg)
   } // end of switch (eventCode)
 }
 
-#ifdef PTM_MODE
-/*********************************************************************
-* @fn      SimplePeripheral_doEnablePTMMode
-*
-* @brief   Stop advertising, configure & start PTM mode
-*
-* @param   index - item index from the menu
-*
-* @return  always true
-*/
-bool SimplePeripheral_doEnablePTMMode(uint8_t index)
-{
-  // Clear Display
-  Display_clearLines(dispHandle, 0, 15);
-
-  // Indicate in screen that PTM Mode is initializing
-  Display_printf(dispHandle, 1, 0, "PTM Mode initializing!\n\n\rPlease note UART feed will now stop...");  
-  
-  // Before starting the NPI task close Display driver to make sure there is no shared resource used by both
-  Display_close(dispHandle);
-  
-  // Start NPI task
-  NPITask_createTask(ICALL_SERVICE_CLASS_BLE);
-
-  // Disable Advertising and destroy sets
-  GapAdv_destroy(advHandleLegacy,GAP_ADV_FREE_OPTION_ALL_DATA);
-
-  // Intercept NPI RX events.
-  NPITask_registerIncomingRXEventAppCB(simple_peripheral_handleNPIRxInterceptEvent, INTERCEPT);
-
-  // Register for Command Status information
-  HCI_TL_Init(NULL, (HCI_TL_CommandStatusCB_t) simple_peripheral_sendToNPI, NULL, selfEntity);
-
-  // Register for Events
-  HCI_TL_getCmdResponderID(ICall_getLocalMsgEntityId(ICALL_SERVICE_CLASS_BLE_MSG, selfEntity));
-
-  // Inform Stack to Initialize PTM
-  HCI_EXT_EnablePTMCmd();
-
-  // Open back the display to avoid crashes to future calls to Display_printf (even though they won't go through until reboot)
-  dispHandle = Display_open(Display_Type_ANY, NULL);
-  
-  return TRUE;
-}
-#endif
 /*********************************************************************
 *********************************************************************/
