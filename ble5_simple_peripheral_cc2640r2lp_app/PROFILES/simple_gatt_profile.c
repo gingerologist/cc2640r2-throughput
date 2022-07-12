@@ -74,17 +74,13 @@
 /*********************************************************************
  * GLOBAL VARIABLES
  */
-// Simple GATT Profile Service UUID: 0xFFF0
-CONST uint8 simpleProfileServUUID[ATT_BT_UUID_SIZE] =
-{
-  LO_UINT16(SIMPLEPROFILE_SERV_UUID), HI_UINT16(SIMPLEPROFILE_SERV_UUID)
-};
+// Simple GATT Profile Service UUID: 0x9500
+CONST uint8 simpleProfileServUUID[ATT_UUID_SIZE] =
+{ SIMPLEPROFILE_BASE_UUID_128(SIMPLEPROFILE_SERV_UUID) };
 
-// Characteristic 4 UUID: 0xFFF4
-CONST uint8 simpleProfilechar4UUID[ATT_BT_UUID_SIZE] =
-{
-  LO_UINT16(SIMPLEPROFILE_CHAR4_UUID), HI_UINT16(SIMPLEPROFILE_CHAR4_UUID)
-};
+// Characteristic 4 UUID: 0x9501
+CONST uint8 simpleProfileChar4UUID[ATT_UUID_SIZE] =
+{ SIMPLEPROFILE_BASE_UUID_128(SIMPLEPROFILE_CHAR4_UUID) };
 
 /*********************************************************************
  * EXTERNAL VARIABLES
@@ -119,7 +115,7 @@ static uint8 simpleProfileChar4[SIMPLEPROFILE_CHAR4_LEN] = {0};
 static gattCharCfg_t *simpleProfileChar4Config;
 
 // Simple Profile Characteristic 4 User Description
-static uint8 simpleProfileChar4UserDesp[17] = "Characteristic 4";
+static uint8 simpleProfileChar4UserDesp[6] = "audio";
 
 /*********************************************************************
  * Profile Attributes - Table
@@ -145,7 +141,7 @@ static gattAttribute_t simpleProfileAttrTbl[SERVAPP_NUM_ATTR_SUPPORTED] =
 
     // 2 Characteristic Value 4
     {
-        {   ATT_BT_UUID_SIZE, simpleProfilechar4UUID},
+        {   ATT_UUID_SIZE, simpleProfileChar4UUID},
         0,
         0,
         simpleProfileChar4
@@ -342,16 +338,10 @@ static bStatus_t simpleProfile_ReadAttrCB(uint16_t connHandle,
 {
   bStatus_t status = SUCCESS;
 
-  // Make sure it's not a blob operation (no attributes in the profile are long)
-  if ( offset > 0 )
+  if ( pAttr->type.len == ATT_UUID_SIZE )
   {
-    return ( ATT_ERR_ATTR_NOT_LONG );
-  }
-
-  if ( pAttr->type.len == ATT_BT_UUID_SIZE )
-  {
-    // 16-bit UUID
-    uint16 uuid = BUILD_UINT16( pAttr->type.uuid[0], pAttr->type.uuid[1]);
+    // Get 16-bit UUID from 128-bit UUID
+    uint16 uuid = BUILD_UINT16( pAttr->type.uuid[12], pAttr->type.uuid[13]);
     switch ( uuid )
     {
       case SIMPLEPROFILE_CHAR4_UUID:
@@ -427,6 +417,39 @@ static bStatus_t simpleProfile_WriteAttrCB(uint16_t connHandle,
         status = ATT_ERR_ATTR_NOT_FOUND;
         break;
     }
+  }
+  else if ( pAttr->type.len == ATT_UUID_SIZE )
+  {
+        // 128-bit UUID
+        uint16 uuid = BUILD_UINT16(pAttr->type.uuid[12], pAttr->type.uuid[13]);
+        switch (uuid)
+        {
+        case SIMPLEPROFILE_CHAR4_UUID:
+            // Make sure it's not a blob oper
+            if (offset == 0)
+            {
+                if (len != 1)   // TODO check length here
+                {
+                    status = ATT_ERR_INVALID_VALUE_SIZE;
+                }
+            }
+            else
+            {
+                status = ATT_ERR_ATTR_NOT_LONG;
+            }
+
+            //Write the value
+            if (status == SUCCESS)
+            {
+                // TODO do something here
+            }
+            break;
+
+        default:
+            // Should never get here! (characteristics 2 and 4 do not have write permissions)
+            status = ATT_ERR_ATTR_NOT_FOUND;
+            break;
+        }
   }
   else
   {

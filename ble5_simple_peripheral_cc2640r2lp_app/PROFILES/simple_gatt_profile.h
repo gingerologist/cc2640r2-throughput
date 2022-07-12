@@ -60,29 +60,25 @@ extern "C" {
  * CONSTANTS
  */
 
-// Profile Parameters
-// #define SIMPLEPROFILE_CHAR1                     0  // RW uint8 - Profile Characteristic 1 value
-// #define SIMPLEPROFILE_CHAR2                     1  // RW uint8 - Profile Characteristic 2 value
-// #define SIMPLEPROFILE_CHAR3                     2  // RW uint8 - Profile Characteristic 3 value
+
 #define SIMPLEPROFILE_CHAR4                     3  // RW uint8 - Profile Characteristic 4 value
-// #define SIMPLEPROFILE_CHAR5                     4  // RW uint8 - Profile Characteristic 4 value
+
+// Simple Profile 128-bit UUID base: 7c95XXXX-6d0c-436f-81c8-3fd7e3db0610
+#define SIMPLEPROFILE_BASE_UUID_128( uuid ) \
+    0x10, 0x06, 0xdb, 0xe3, 0xd7, 0x3f, 0xc8, 0x81, \
+    0x6f, 0x43, 0x0c, 0x6d, LO_UINT16( uuid ), HI_UINT16( uuid ), 0x95, 0x7c
 
 // Simple Profile Service UUID
-#define SIMPLEPROFILE_SERV_UUID                 0xFFF0
+#define SIMPLEPROFILE_SERV_UUID                 0x9500
 
 // Key Pressed UUID
-// #define SIMPLEPROFILE_CHAR1_UUID                0xFFF1
-// #define SIMPLEPROFILE_CHAR2_UUID                0xFFF2
-// #define SIMPLEPROFILE_CHAR3_UUID                0xFFF3
-#define SIMPLEPROFILE_CHAR4_UUID                0xFFF4
-// #define SIMPLEPROFILE_CHAR5_UUID                0xFFF5
+#define SIMPLEPROFILE_CHAR4_UUID                0x9501
 
 // Simple Keys Profile Services bit fields
 #define SIMPLEPROFILE_SERVICE                   0x00000001
 
-// Length of Characteristic 5 in bytes
+// Length of Characteristic 4 in bytes
 #define SIMPLEPROFILE_CHAR4_LEN                 244
-// #define SIMPLEPROFILE_CHAR5_LEN                 5
 
 /*********************************************************************
  * TYPEDEFS
@@ -95,14 +91,6 @@ extern "C" {
 /*********************************************************************
  * Profile Callbacks
  */
-
-// Callback when a characteristic value has changed
-typedef void (*simpleProfileChange_t)(uint8 paramID);
-
-typedef struct
-{
-    simpleProfileChange_t pfnSimpleProfileChange; // Called when characteristic value changes
-} simpleProfileCBs_t;
 
 /*********************************************************************
  * API FUNCTIONS

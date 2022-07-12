@@ -180,10 +180,9 @@ static uint8_t advertData[] =
 
   // service UUID, to notify central devices what services are included
   // in this peripheral
-  0x03,   // length of this data
-  GAP_ADTYPE_16BIT_MORE,      // some of the UUID's, but not all
-  LO_UINT16(SIMPLEPROFILE_SERV_UUID),
-  HI_UINT16(SIMPLEPROFILE_SERV_UUID)
+  0x11,   // length of this data
+  GAP_ADTYPE_128BIT_COMPLETE,      // some of the UUID's, but not all
+  SIMPLEPROFILE_BASE_UUID_128(SIMPLEPROFILE_SERV_UUID)
 };
 
 // Scan Response Data
